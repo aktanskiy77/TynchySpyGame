@@ -1,0 +1,32 @@
+body {
+  margin: 0; padding: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background-color: #4a0404;
+  background-image: url('https://www.transparenttextures.com/patterns/dark-matter.png');
+  color: #f1f5f9;
+  display: flex; justify-content: center; min-height: 100vh;
+}
+.container { width: 95%; max-width: 450px; padding: 20px; box-sizing: border-box; }
+.logo { font-size: 2.5rem; color: #fbbf24; text-align: center; border-bottom: 2px solid #fbbf24; padding-bottom: 10px; }
+input { width: 100%; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 2px solid #fbbf24; background: rgba(255,255,255,0.1); color: white; box-sizing: border-box; }
+button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; text-transform: uppercase; margin-top: 10px; }
+.btn-join, .btn-start { background: #fbbf24; color: #4a0404; }
+.btn-exit { background: transparent; color: #fbbf24; border: 1px solid #fbbf24; width: auto; padding: 5px 10px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.9rem; }
+.player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+.player-card { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 10px; border: 1px solid #fbbf24; text-align: center; }
+.admin-border { border: 2px solid #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+.category-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin: 10px 0; }
+.cat-btn { padding: 5px !important; font-size: 0.7rem !important; background: rgba(0,0,0,0.4); color: #fbbf24; border: 1px solid #fbbf24; }
+.cat-btn.active { background: #fbbf24; color: #4a0404; }
+.spy-help { background: rgba(0,0,0,0.4); padding: 15px; border-radius: 15px; margin-top: 20px; border: 1px solid #fbbf24; font-size: 0.8rem; }
+.word-list { color: #cbd5e1; font-style: italic; }
+.btn-kick { background: #e11d48; color: white; }
+.vote-btn.voted { background: #fbbf24; color: #4a0404; }
+.spy { color: #f87171; }
+.word { color: #34d399; }
+
+@media (max-width: 480px) {
+  .player-grid { grid-template-columns: 1fr; }
+  .category-grid { grid-template-columns: 1fr 1fr; }
+}
