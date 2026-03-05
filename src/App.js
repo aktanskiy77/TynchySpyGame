@@ -224,7 +224,7 @@ function App() {
           ) : (
             <div className="role-display" onClick={() => setShowRole(false)}>
               <p>Сенин ролуң:</p>
-              <h2 className={role === 'ШПИОН 🕵️‍♂️' ? 'spy' : 'word'}>{role}</h2>
+              <h2 className={role === 'ТЫНЧЫ 🕵️‍♂️' ? 'spy' : 'word'}>{role}</h2>
               <span className="hint">(Жашыруу үчүн басыңыз)</span>
             </div>
           )}
