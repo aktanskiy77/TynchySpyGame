@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, set, onValue, update, remove, onDisconnect } from "firebase/database";
+import { getDatabase, ref, set, onValue, update, remove, onDisconnect, push, runTransaction, get } from "firebase/database";
 import './index.css';
 
-// Сенин Firebase конфигиң
+// Твой конфиг Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyB-u8gX3VpYzP5pNgq7uxWZr-789hVK1o8",
   authDomain: "tynchyspy.firebaseapp.com",
@@ -36,230 +36,219 @@ function App() {
   const [admin, setAdmin] = useState('');
   const [votes, setVotes] = useState({});
   const [selectedCategory, setSelectedCategory] = useState('Кыргызстан');
-  const [currentCategory, setCurrentCategory] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState('');
+  const [lastResult, setLastResult] = useState('');
+  const [kickedPlayers, setKickedPlayers] = useState([]); 
+  const chatEndRef = useRef(null);
 
-  const allCategoryKeys = [...Object.keys(CATEGORIES), "Баардыгы", "Оюнчулар"];
-
-  // Негизги угуучу (Listener)
   useEffect(() => {
     if (joined && room) {
       const roomRef = ref(db, `rooms/${room}`);
-      
-      // Байланыш үзүлгөндө оюнчуну автоматтык түрдө өчүрүү
       const playerRef = ref(db, `rooms/${room}/players/${name}`);
+
+      // Самоочистка при выходе
       onDisconnect(playerRef).remove();
 
       return onValue(roomRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
+          // Если игроков нет — удаляем комнату полностью
+          if (!data.players || Object.keys(data.players).length === 0) {
+            remove(roomRef);
+            return;
+          }
+
           setPlayers(data.players || {});
           setGameState(data.state || 'lobby');
           setAdmin(data.admin || '');
           setVotes(data.votes || {});
-          setCurrentCategory(data.category || '');
+          setLastResult(data.lastResult || '');
+          
+          const kicked = data.kickedPlayers ? Object.values(data.kickedPlayers) : [];
+          setKickedPlayers(kicked);
+          
+          if (data.category) setSelectedCategory(data.category);
+          setMessages(data.chat ? Object.values(data.chat) : []);
+          if (data.assignments && data.assignments[name]) setRole(data.assignments[name]);
 
-          if (data.kicked === name) {
-            alert("Сени көпчүлүк добуш менен чыгарып жиберишти! ⛔");
-            exitRoom();
-          }
-
-          if (data.state === 'started' && data.assignments) {
-            setRole(data.assignments[name] || '');
+          // Передача админки если текущий админ вышел
+          if (data.admin === name && !data.players[name]) {
+             const others = Object.keys(data.players);
+             if (others.length > 0) update(roomRef, { admin: others[0] });
           }
         }
       });
     }
   }, [joined, room, name]);
 
-  const joinRoom = () => {
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const joinRoom = async () => {
     if (name.trim() && room.trim()) {
-      const roomRef = ref(db, `rooms/${room}`);
-      onValue(roomRef, (snapshot) => {
-        const data = snapshot.val();
-        if (!data || !data.admin) {
-          update(ref(db, `rooms/${room}`), { admin: name });
-        }
-      }, { onlyOnce: true });
-      set(ref(db, `rooms/${room}/players/${name}`), { name });
+      const adminRef = ref(db, `rooms/${room}/admin`);
+      
+      // Транзакция: админом станет только первый
+      await runTransaction(adminRef, (current) => {
+        return current === null ? name : current;
+      });
+
+      await set(ref(db, `rooms/${room}/players/${name}`), { name });
       setJoined(true);
     }
   };
 
-  const exitRoom = () => {
-    if (!room || !name) return;
-    const playerRef = ref(db, `rooms/${room}/players/${name}`);
-    const roomRef = ref(db, `rooms/${room}`);
-
-    remove(playerRef).then(() => {
-      onValue(ref(db, `rooms/${room}/players`), (snapshot) => {
-        if (!snapshot.exists()) {
-          remove(roomRef); // Акыркы адам чыкса бөлмөнү өчүрүү
-        }
-      }, { onlyOnce: true });
-    });
-
-    setJoined(false);
-    setRoom('');
-    setName('');
-    setRole('');
-    setShowRole(false);
+  const sendMessage = (e) => {
+    e.preventDefault();
+    if (!inputText.trim()) return;
+    push(ref(db, `rooms/${room}/chat`), { user: name, text: inputText });
+    setInputText('');
   };
 
   const startGame = () => {
-    if (name !== admin) return;
     const playerNames = Object.keys(players);
-    if (playerNames.length < 3) return alert("Минимум 3 оюнчу керек!");
-
-    let finalCategory = selectedCategory;
-    let wordList = [];
-
-    if (selectedCategory === "Баардыгы") {
-      const themes = Object.keys(CATEGORIES);
-      finalCategory = themes[Math.floor(Math.random() * themes.length)];
-      wordList = CATEGORIES[finalCategory];
-    } else if (selectedCategory === "Оюнчулар") {
-      wordList = playerNames;
-      finalCategory = "Оюнчулардын аттары";
-    } else {
-      wordList = CATEGORIES[selectedCategory];
-    }
-
-    const spyName = playerNames[Math.floor(Math.random() * playerNames.length)];
-    const word = wordList[Math.floor(Math.random() * wordList.length)];
-    const assignments = {};
+    if (playerNames.length < 3) return alert("Кеминде 3 оюнчу керек!");
     
-    playerNames.forEach(p => {
-      assignments[p] = (p === spyName) ? "ШПИОН 🕵️‍♂️" : word;
-    });
+    const spyName = playerNames[Math.floor(Math.random() * playerNames.length)];
+    const word = CATEGORIES[selectedCategory][Math.floor(Math.random() * CATEGORIES[selectedCategory].length)];
+    
+    const assignments = {};
+    playerNames.forEach(p => { assignments[p] = (p === spyName) ? "ТЫНЧЫ 🕵️‍♂️" : word; });
 
     update(ref(db, `rooms/${room}`), { 
       state: 'started', 
       assignments, 
-      category: finalCategory,
-      votes: {},
-      kicked: null 
+      votes: {}, 
+      lastResult: '',
+      kickedPlayers: null 
     });
-  };
-
-  const goToVoting = () => {
-    if (name !== admin) return;
-    update(ref(db, `rooms/${room}`), { state: 'voting' });
-  };
-
-  const kickAndReset = () => {
-    if (name !== admin) return;
-    const voteCounts = {};
-    Object.values(votes).forEach(target => {
-      voteCounts[target] = (voteCounts[target] || 0) + 1;
-    });
-
-    let winner = null;
-    let maxVotes = 0;
-    for (const [player, count] of Object.entries(voteCounts)) {
-      if (count > maxVotes) {
-        maxVotes = count;
-        winner = player;
-      }
-    }
-
-    update(ref(db, `rooms/${room}`), { 
-      kicked: winner,
-      state: 'lobby',
-      assignments: null,
-      votes: {}
-    });
-    setTimeout(() => update(ref(db, `rooms/${room}`), { kicked: null }), 2000);
     setShowRole(false);
   };
 
-  if (!joined) {
-    return (
-      <div className="container">
-        <h1 className="logo">TynchySpy</h1>
-        <div className="input-group">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Сенин атың" />
-          <input value={room} onChange={e => setRoom(e.target.value)} placeholder="Бөлмө коду" />
-          <button className="btn-join" onClick={joinRoom}>Кирүү</button>
-        </div>
+  const handleVote = async () => {
+    if (name !== admin) return;
+    const voteCounts = {};
+    Object.values(votes).forEach(v => voteCounts[v] = (voteCounts[v] || 0) + 1);
+    let kicked = Object.keys(voteCounts).reduce((a, b) => (voteCounts[a] > voteCounts[b] ? a : b), null);
+    
+    if (!kicked) return alert("Эч ким тандалган жок!");
+
+    const snap = await get(ref(db, `rooms/${room}/assignments/${kicked}`));
+    const kickedRole = snap.val();
+
+    if (kickedRole === "ТЫНЧЫ 🕵️‍♂️") {
+      update(ref(db, `rooms/${room}`), { 
+        state: 'lobby', 
+        lastResult: `ЖЕҢИШ! 🎉 Шпион табылды: ${kicked}.`,
+        votes: {},
+        assignments: null,
+        kickedPlayers: null
+      });
+    } else {
+      const currentKicked = [...kickedPlayers, kicked];
+      update(ref(db, `rooms/${room}`), { 
+        state: 'started', 
+        votes: {},
+        kickedPlayers: currentKicked,
+        lastResult: `${kicked} шпион эмес болчу! Ал эми байкоочу.` 
+      });
+    }
+  };
+
+  if (!joined) return (
+    <div className="container">
+      <h1 className="logo">TynchySpy</h1>
+      <div className="box">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Атың ким?" />
+        <input value={room} onChange={e => setRoom(e.target.value)} placeholder="Бөлмө коду" />
+        <button className="btn-main" onClick={joinRoom}>КИРҮҮ</button>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const isObserver = kickedPlayers.includes(name);
 
   return (
     <div className="container">
       <div className="header">
-        <span>Бөлмө: <b>{room}</b> | Админ: <b>{admin}</b></span>
-        <button className="btn-exit" onClick={exitRoom}>Чыгуу</button>
+        <div className="room-badge">Бөлмө: {room}</div>
+        {isObserver && <div className="observer-badge">Байкоочу 👀</div>}
+        <button className="btn-exit" onClick={() => window.location.reload()}>Чыгуу</button>
       </div>
 
       {gameState === 'lobby' && (
-        <div className="lobby">
-          <h2>Оюнчулар ({Object.keys(players).length}):</h2>
-          <div className="player-grid">
+        <div className="box">
+          {lastResult && <div className="result-banner">{lastResult}</div>}
+          <h3 className="section-title">Оюнчулар ({Object.keys(players).length}):</h3>
+          <div className="grid">
             {Object.keys(players).map(p => (
-              <div key={p} className={`player-card ${p === admin ? 'admin-border' : ''}`}>
+              <div key={p} className={`card ${p === admin ? 'admin-border' : ''} ${kickedPlayers.includes(p) ? 'is-kicked' : ''}`}>
                 {p} {p === admin && "⭐"}
               </div>
             ))}
           </div>
-          
           {name === admin && (
-            <div className="category-section">
-              <p>Теманы тандаңыз:</p>
+            <div className="admin-panel">
+              <p>Тема:</p>
               <div className="category-grid">
-                {allCategoryKeys.map(cat => (
-                  <button key={cat} className={`cat-btn ${selectedCategory === cat ? 'active' : ''}`} onClick={() => setSelectedCategory(cat)}>{cat}</button>
+                {Object.keys(CATEGORIES).map(cat => (
+                  <button key={cat} className={`cat-btn ${selectedCategory === cat ? 'active' : ''}`} onClick={() => update(ref(db, `rooms/${room}`), {category: cat})}>{cat}</button>
                 ))}
               </div>
-              <button className="btn-start" onClick={startGame}>Оюнду баштоо</button>
+              <button className="btn-main" onClick={startGame}>Оюнду баштоо</button>
             </div>
           )}
         </div>
       )}
 
       {gameState === 'started' && (
-        <div className="game-box">
-          {!showRole ? (
-            <button className="btn-reveal" onClick={() => setShowRole(true)}>Сөздү көрүү</button>
-          ) : (
-            <div className="role-display" onClick={() => setShowRole(false)}>
-              <p>Сенин ролуң:</p>
-              <h2 className={role === 'ТЫНЧЫ 🕵️‍♂️' ? 'spy' : 'word'}>{role}</h2>
-              <span className="hint">(Жашыруу үчүн басыңыз)</span>
-            </div>
-          )}
-          
-          <div className="spy-help">
-            <p>Тема: <b>{currentCategory}</b></p>
-            {role === 'ШПИОН 🕵️‍♂️' && (
-              <div className="word-list">
-                <p>Мүмкүн болгон сөздөр:</p>
-                <span>
-                  {currentCategory === "Оюнчулардын аттары" 
-                    ? Object.keys(players).join(", ") 
-                    : CATEGORIES[currentCategory]?.join(", ")}
-                </span>
+        <div className="box">
+          {!isObserver ? (
+            <>
+              <div className="role-card" onClick={() => setShowRole(!showRole)}>
+                {showRole ? <div className="role-reveal"><p>Ролуңуз:</p><h2 className="role-text">{role}</h2></div> : <h2>Ролду көрүү 👀</h2>}
               </div>
-            )}
-          </div>
-
-          {name === admin && <button className="btn-vote-trigger" onClick={goToVoting}>Голосование</button>}
+              <p className="topic-hint">Тема: <b>{selectedCategory}</b></p>
+            </>
+          ) : (
+            <div className="observer-screen"><h3>Сиз байкоочусуз</h3><p>Оюнду чаттан байкаңыз.</p></div>
+          )}
+          {lastResult && <div className="mini-result">{lastResult}</div>}
+          {name === admin && <button className="btn-main" onClick={() => update(ref(db, `rooms/${room}`), {state: 'voting'})}>Добуш берүүгө өтүү</button>}
         </div>
       )}
 
       {gameState === 'voting' && (
-        <div className="voting-screen">
-          <h2>Ким шпион?</h2>
-          <div className="player-grid">
-            {Object.keys(players).map(p => (
-              <button key={p} className={`player-card vote-btn ${votes[name] === p ? 'voted' : ''}`} onClick={() => update(ref(db, `rooms/${room}/votes`), { [name]: p })} disabled={p === name}>
-                {p} <div className="vote-count">{Object.values(votes).filter(v => v === p).length} 🗳️</div>
-              </button>
-            ))}
+        <div className="box">
+          <h3 className="section-title">Ким шпион?</h3>
+          <div className="grid">
+            {Object.keys(players).map(p => {
+              if (kickedPlayers.includes(p)) return null;
+              return (
+                <button key={p} disabled={isObserver || p === name} className={`card ${votes[name] === p ? 'active' : ''}`} onClick={() => update(ref(db, `rooms/${room}/votes`), {[name]: p})}>
+                  {p} ({Object.values(votes).filter(v => v === p).length} 🗳️)
+                </button>
+              );
+            })}
           </div>
-          {name === admin && <button className="btn-kick" onClick={kickAndReset}>Натыйжа жана КИК</button>}
+          {name === admin && <button className="btn-kick" onClick={handleVote}>Натыйжаны текшерүү</button>}
         </div>
       )}
+
+      <div className="chat-container">
+        <div className="chat-messages">
+          {messages.map((m, i) => (
+            <div key={i} className={`msg ${m.user === name ? 'my' : ''}`}><b>{m.user}:</b> {m.text}</div>
+          ))}
+          <div ref={chatEndRef} />
+        </div>
+        <form onSubmit={sendMessage} className="chat-input">
+          <input value={inputText} onChange={e => setInputText(e.target.value)} placeholder="Жазуу..." />
+          <button type="submit">⬆️</button>
+        </form>
+      </div>
     </div>
   );
 }
